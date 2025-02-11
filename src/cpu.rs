@@ -1,24 +1,26 @@
+use std::ops::Mul;
+
 use crate::mmu::{BIOS_START, MMU};
 
 pub struct CPU {
     registers: [u32; 32],
-    mmu: MMU,
     pc: u32,
+    mmu: MMU,
+    cop0: Coprocessor,
 }
 
 impl CPU {
     pub fn new(mmu: MMU) -> Self {
         Self {
             registers: [0; 32],
-            mmu,
             pc: BIOS_START,
+            mmu,
+            cop0: Coprocessor::new(),
         }
     }
 
     fn load_instruction(&self) -> Instruction {
         let word = self.mmu.read(self.pc);
-
-        println!("0x{:2x}", word);
 
         Instruction(word)
     }
@@ -26,16 +28,29 @@ impl CPU {
     pub fn step(&mut self) {
         let instruction = self.load_instruction();
 
+        let (next_pc) = self.execute(instruction);
+
+        self.pc = next_pc;
+    }
+
+    fn execute(&mut self, instruction: Instruction) -> (u32) {
         let opcode = instruction.opcode();
 
         let secondary_opcode = instruction.secondary_opcode();
 
-        println!("Opcode {:b}, Secondary {:b}", opcode, secondary_opcode);
-
         match opcode {
             0b000000 => match secondary_opcode {
                 0b000000 => {
-                    panic!("SLL")
+                    // SLL
+                    let shift = instruction.immediate_shift();
+                    let s = instruction.s() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = self.registers[s] << shift;
+
+                    self.registers[d] = value;
+
+                    (self.pc.wrapping_add(4))
                 }
                 0b000010 => {
                     panic!("SRL")
@@ -53,7 +68,8 @@ impl CPU {
                     panic!("SRAV")
                 }
                 0b001000 => {
-                    panic!("JR")
+                    // JR
+                    (self.registers[instruction.s() as usize])
                 }
                 0b001001 => {
                     panic!("JALR")
@@ -104,7 +120,16 @@ impl CPU {
                     panic!("AND")
                 }
                 0b100101 => {
-                    panic!("OR")
+                    // OR
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = self.registers[s] | self.registers[t];
+
+                    self.registers[d] = value;
+
+                    (self.pc.wrapping_add(4))
                 }
                 0b100110 => {
                     panic!("XOR")
@@ -126,7 +151,9 @@ impl CPU {
                 panic!("BXX")
             }
             0b000010 => {
-                panic!("J")
+                // J
+                let jump = instruction.immediate_jump();
+                (self.pc & 0xF0000000) + jump.mul(4)
             }
             0b000011 => {
                 panic!("JAL")
@@ -135,7 +162,18 @@ impl CPU {
                 panic!("BEQ")
             }
             0b000101 => {
-                panic!("BNE")
+                // BNE
+                let s = instruction.s();
+                let t = instruction.t();
+
+                let value = self.registers[s as usize] != self.registers[t as usize];
+
+                if value {
+                    let immediate = instruction.immediate_sign_extended();
+                    return self.pc.wrapping_add(immediate << 2);
+                }
+
+                (self.pc.wrapping_add(4))
             }
             0b000110 => {
                 panic!("BLEZ")
@@ -147,7 +185,16 @@ impl CPU {
                 panic!("ADDI")
             }
             0b001001 => {
-                panic!("ADDIU")
+                // ADDIU
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let value = self.registers[s].wrapping_add(immediate);
+
+                self.registers[t] = value;
+
+                (self.pc.wrapping_add(4))
             }
             0b001010 => {
                 panic!("SLTI")
@@ -159,25 +206,61 @@ impl CPU {
                 panic!("ANDI")
             }
             0b001101 => {
+                // ORI
                 let immediate = instruction.immediate();
-                let source = instruction.source() as usize;
-                let target = instruction.target() as usize;
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
 
-                let value = self.registers[source] | immediate;
+                let value = self.registers[s] | immediate;
 
-                self.registers[target] = value;
+                self.registers[t] = value;
+
+                (self.pc.wrapping_add(4))
             }
             0b001110 => {
                 panic!("XORI")
             }
             0b001111 => {
+                // LUI
                 let value = instruction.immediate();
-                let target = instruction.target() as usize;
+                let t = instruction.t() as usize;
 
-                self.registers[target] = value << 16;
+                self.registers[t] = value << 16;
+
+                (self.pc.wrapping_add(4))
             }
             0b010000 => {
-                panic!("COP0")
+                // COP0
+                let coprocessor_opcode = instruction.coprocessor_opcode();
+                match coprocessor_opcode {
+                    0b0000 => {
+                        panic!("MFCn");
+                    }
+                    0b0010 => {
+                        panic!("CFCn");
+                    }
+                    0b0100 => {
+                        let r = instruction.t();
+                        let cop0_r = instruction.d();
+
+                        let value = self.registers[r as usize];
+
+                        match cop0_r {
+                            12 => {
+                                self.cop0.status = value;
+                            }
+                            _ => panic!("Unsupported COP0 register"),
+                        }
+
+                        (self.pc.wrapping_add(4))
+                    }
+                    0b1000 => {
+                        panic!("CTCn");
+                    }
+                    _ => {
+                        panic!("Unhandled coprocessor opcode")
+                    }
+                }
             }
             0b010001 => {
                 panic!("COP1")
@@ -219,14 +302,17 @@ impl CPU {
                 panic!("SWL")
             }
             0b101011 => {
+                // SW
                 let immediate = instruction.immediate();
-                let source = instruction.source();
+                let s = instruction.s();
 
-                let address = immediate + source;
-                let target = instruction.target();
+                let address = immediate + s;
+                let t = instruction.t();
 
                 // TODO: Write queue?
-                self.mmu.write(address, target);
+                self.mmu.write(address, t);
+
+                (self.pc.wrapping_add(4))
             }
             0b101110 => {
                 panic!("SWR")
@@ -259,8 +345,6 @@ impl CPU {
                 panic!("Invalid instruction")
             }
         }
-
-        self.pc = self.pc.wrapping_add(4);
     }
 }
 
@@ -277,18 +361,59 @@ impl Instruction {
         self.0 & 0x3F
     }
 
+    // Coprocessor opcode bit 21..25
+    pub fn coprocessor_opcode(&self) -> u32 {
+        self.0 >> 21 & 0x1F
+    }
+
     // Immediate values are first 16 bits
     pub fn immediate(&self) -> u32 {
         self.0 & 0xFFFF
     }
 
-    // Target is bit 16..20
-    pub fn target(&self) -> u32 {
+    // Immediate values are first 16 bits
+    pub fn immediate_sign_extended(&self) -> u32 {
+        ((self.0 & 0xFFFF) as i16) as u32
+    }
+
+    // T is bit 16..20
+    pub fn t(&self) -> u32 {
         (self.0 >> 16) & 0x1F
     }
 
-    // Source is bit 21..25
-    pub fn source(&self) -> u32 {
+    // S is bit 21..25
+    pub fn s(&self) -> u32 {
         (self.0 >> 21) & 0x1F
+    }
+
+    // D is bit 11..15
+    pub fn d(&self) -> u32 {
+        (self.0 >> 11) & 0x1F
+    }
+
+    // Immediate shift is bit 6..10
+    pub fn immediate_shift(&self) -> u32 {
+        (self.0 >> 6) & 0x1F
+    }
+
+    // Immediate jump values are bit 0..25
+    pub fn immediate_jump(&self) -> u32 {
+        self.0 & 0x3FFFFFF
+    }
+}
+
+struct Coprocessor {
+    status: u32, // System status register
+    cause: u32,  // Describes the most recently recognized exception
+    epc: u32,    // Retrun address from trap
+}
+
+impl Coprocessor {
+    pub fn new() -> Self {
+        Self {
+            status: 0,
+            cause: 0,
+            epc: 0,
+        }
     }
 }

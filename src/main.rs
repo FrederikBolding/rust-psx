@@ -13,7 +13,7 @@ fn main() {
     let mmu = MMU::new(bios);
     let mut cpu = CPU::new(mmu);
 
-    for _ in 0..10 {
+    loop {
         cpu.step();
     }
 }
