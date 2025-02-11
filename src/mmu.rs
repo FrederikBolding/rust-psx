@@ -8,7 +8,7 @@ pub const RAM_END: u32 = RAM_START + RAM_SIZE;
 
 pub struct MMU {
     bios: Vec<u8>,
-    ram: Box<[u32; RAM_SIZE as usize]>,
+    ram: Box<[u8; RAM_SIZE as usize]>,
 }
 
 impl MMU {
@@ -19,31 +19,37 @@ impl MMU {
         }
     }
 
-    fn read_bios_word(&self, offset: u32) -> u32 {
+    pub fn read(&self, address: u32) -> u32 {
         let mut word = 0;
 
+        let offset = match address {
+            RAM_START..RAM_END => address,
+            BIOS_START..BIOS_END => address - BIOS_START,
+            _ => panic!("Cannot read from address"),
+        } as usize;
+
+        let source = match address {
+            RAM_START..RAM_END => &self.ram[offset..offset + 4],
+            BIOS_START..BIOS_END => &self.bios[offset..offset + 4],
+            _ => panic!("Cannot read from address"),
+        };
+
         for i in 0..4 {
-            let value = self.bios[(offset + i) as usize];
+            let value = source[i];
             word |= (value as u32) << (i * 8)
         }
 
         word
     }
 
-    pub fn read(&self, address: u32) -> u32 {
-        match address {
-            RAM_START..RAM_END => self.ram[address as usize],
-            BIOS_START..BIOS_END => self.read_bios_word(address - BIOS_START),
-            _ => panic!("Cannot read from address"),
-        }
-    }
-
     pub fn write(&mut self, address: u32, value: u32) {
-        match address {
-            RAM_START..RAM_END => {
-                self.ram[address as usize] = value;
+        for i in 0..4 {
+            match address {
+                RAM_START..RAM_END => {
+                    self.ram[(address + i) as usize] = (value >> (i * 8)) as u8;
+                }
+                _ => panic!("Cannot write to address 0x{:2x}", address),
             }
-            _ => panic!("Cannot write to address 0x{:2x}", address),
         }
     }
 }
