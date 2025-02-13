@@ -43,10 +43,10 @@ impl CPU {
                 0b000000 => {
                     // SLL
                     let shift = instruction.immediate_shift();
-                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
 
-                    let value = self.registers[s] << shift;
+                    let value = self.registers[t] << shift;
 
                     self.registers[d] = value;
 
@@ -153,7 +153,7 @@ impl CPU {
             0b000010 => {
                 // J
                 let jump = instruction.immediate_jump();
-                (self.pc & 0xF0000000) + jump.mul(4)
+                (self.pc & 0xF0000000) | jump
             }
             0b000011 => {
                 panic!("JAL")
@@ -170,7 +170,7 @@ impl CPU {
 
                 if value {
                     let immediate = instruction.immediate_sign_extended();
-                    return self.pc.wrapping_add(immediate << 2);
+                    return (self.pc.wrapping_add(immediate << 2));
                 }
 
                 (self.pc.wrapping_add(4))
@@ -234,12 +234,13 @@ impl CPU {
                 let coprocessor_opcode = instruction.coprocessor_opcode();
                 match coprocessor_opcode {
                     0b0000 => {
-                        panic!("MFCn");
+                        panic!("MFC0");
                     }
                     0b0010 => {
-                        panic!("CFCn");
+                        panic!("CFC0");
                     }
                     0b0100 => {
+                        // MTC0
                         let r = instruction.t();
                         let cop0_r = instruction.d();
 
@@ -255,7 +256,7 @@ impl CPU {
                         (self.pc.wrapping_add(4))
                     }
                     0b1000 => {
-                        panic!("CTCn");
+                        panic!("CTC0");
                     }
                     _ => {
                         panic!("Unhandled coprocessor opcode")
@@ -303,14 +304,15 @@ impl CPU {
             }
             0b101011 => {
                 // SW
-                let immediate = instruction.immediate();
+                let immediate = instruction.immediate_sign_extended();
                 let s = instruction.s();
 
-                let address = immediate + s;
+                let address = self.registers[s as usize].wrapping_add(immediate);
                 let t = instruction.t();
+                let value = self.registers[t as usize];
 
                 // TODO: Write queue?
-                self.mmu.write(address, t);
+                self.mmu.write(address, value);
 
                 (self.pc.wrapping_add(4))
             }
@@ -398,7 +400,7 @@ impl Instruction {
 
     // Immediate jump values are bit 0..25
     pub fn immediate_jump(&self) -> u32 {
-        self.0 & 0x3FFFFFF
+        (self.0 & 0x3FFFFFF) << 2
     }
 }
 
