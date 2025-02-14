@@ -1,10 +1,11 @@
-use std::ops::Mul;
-
 use crate::mmu::{BIOS_START, MMU};
 
 pub struct CPU {
     registers: [u32; 32],
-    pc: u32,
+    // Since the CPU is pipelined, we need to keep track of multiple program counters to properly handle branches
+    current_pc: u32, // The currently executing instruction
+    pc: u32,         // Points to the next instruction, NOT the currently executing instruction
+    next_pc: u32,
     mmu: MMU,
     cop0: Coprocessor,
 }
@@ -13,7 +14,9 @@ impl CPU {
     pub fn new(mmu: MMU) -> Self {
         Self {
             registers: [0; 32],
+            current_pc: 0,
             pc: BIOS_START,
+            next_pc: BIOS_START.wrapping_add(4),
             mmu,
             cop0: Coprocessor::new(),
         }
@@ -28,12 +31,14 @@ impl CPU {
     pub fn step(&mut self) {
         let instruction = self.load_instruction();
 
-        let (next_pc) = self.execute(instruction);
+        self.current_pc = self.pc;
+        self.pc = self.next_pc;
+        self.next_pc = self.next_pc.wrapping_add(4);
 
-        self.pc = next_pc;
+        self.execute(instruction);
     }
 
-    fn execute(&mut self, instruction: Instruction) -> (u32) {
+    fn execute(&mut self, instruction: Instruction) {
         let opcode = instruction.opcode();
 
         let secondary_opcode = instruction.secondary_opcode();
@@ -49,8 +54,6 @@ impl CPU {
                     let value = self.registers[t] << shift;
 
                     self.registers[d] = value;
-
-                    (self.pc.wrapping_add(4))
                 }
                 0b000010 => {
                     panic!("SRL")
@@ -69,7 +72,7 @@ impl CPU {
                 }
                 0b001000 => {
                     // JR
-                    (self.registers[instruction.s() as usize])
+                    self.next_pc = self.registers[instruction.s() as usize];
                 }
                 0b001001 => {
                     panic!("JALR")
@@ -128,8 +131,6 @@ impl CPU {
                     let value = self.registers[s] | self.registers[t];
 
                     self.registers[d] = value;
-
-                    (self.pc.wrapping_add(4))
                 }
                 0b100110 => {
                     panic!("XOR")
@@ -153,7 +154,7 @@ impl CPU {
             0b000010 => {
                 // J
                 let jump = instruction.immediate_jump();
-                (self.pc.wrapping_add(4) & 0xF0000000) | jump
+                self.next_pc = (self.pc & 0xF0000000) | jump
             }
             0b000011 => {
                 panic!("JAL")
@@ -170,10 +171,8 @@ impl CPU {
 
                 if value {
                     let immediate = instruction.immediate_sign_extended();
-                    return (self.pc.wrapping_add(4).wrapping_add(immediate << 2));
+                    self.next_pc = self.pc.wrapping_add(immediate << 2);
                 }
-
-                (self.pc.wrapping_add(4))
             }
             0b000110 => {
                 panic!("BLEZ")
@@ -193,8 +192,6 @@ impl CPU {
                 let value = self.registers[s].wrapping_add(immediate);
 
                 self.registers[t] = value;
-
-                (self.pc.wrapping_add(4))
             }
             0b001010 => {
                 panic!("SLTI")
@@ -214,8 +211,6 @@ impl CPU {
                 let value = self.registers[s] | immediate;
 
                 self.registers[t] = value;
-
-                (self.pc.wrapping_add(4))
             }
             0b001110 => {
                 panic!("XORI")
@@ -226,8 +221,6 @@ impl CPU {
                 let t = instruction.t() as usize;
 
                 self.registers[t] = value << 16;
-
-                (self.pc.wrapping_add(4))
             }
             0b010000 => {
                 // COP0
@@ -252,8 +245,6 @@ impl CPU {
                             }
                             _ => panic!("Unsupported COP0 register"),
                         }
-
-                        (self.pc.wrapping_add(4))
                     }
                     0b1000 => {
                         panic!("CTC0");
@@ -313,13 +304,11 @@ impl CPU {
 
                 if self.cop0.is_cache_isolated() {
                     // TODO: Handle writing to the cache
-                    return (self.pc.wrapping_add(4));
+                    return;
                 }
 
                 // TODO: Write queue?
                 self.mmu.write(address, value);
-
-                (self.pc.wrapping_add(4))
             }
             0b101110 => {
                 panic!("SWR")
