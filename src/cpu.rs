@@ -153,7 +153,7 @@ impl CPU {
             0b000010 => {
                 // J
                 let jump = instruction.immediate_jump();
-                (self.pc & 0xF0000000) | jump
+                (self.pc.wrapping_add(4) & 0xF0000000) | jump
             }
             0b000011 => {
                 panic!("JAL")
@@ -170,7 +170,7 @@ impl CPU {
 
                 if value {
                     let immediate = instruction.immediate_sign_extended();
-                    return (self.pc.wrapping_add(immediate << 2));
+                    return (self.pc.wrapping_add(4).wrapping_add(immediate << 2));
                 }
 
                 (self.pc.wrapping_add(4))
@@ -311,6 +311,11 @@ impl CPU {
                 let t = instruction.t();
                 let value = self.registers[t as usize];
 
+                if self.cop0.is_cache_isolated() {
+                    // TODO: Handle writing to the cache
+                    return (self.pc.wrapping_add(4));
+                }
+
                 // TODO: Write queue?
                 self.mmu.write(address, value);
 
@@ -365,7 +370,7 @@ impl Instruction {
 
     // Coprocessor opcode bit 21..25
     pub fn coprocessor_opcode(&self) -> u32 {
-        self.0 >> 21 & 0x1F
+        (self.0 >> 21) & 0x1F
     }
 
     // Immediate values are first 16 bits
@@ -417,5 +422,9 @@ impl Coprocessor {
             cause: 0,
             epc: 0,
         }
+    }
+
+    pub fn is_cache_isolated(&self) -> bool {
+        self.status & 0x10000 != 0
     }
 }

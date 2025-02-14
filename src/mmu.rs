@@ -49,6 +49,10 @@ impl MMU {
         }
     }
 
+    pub fn is_instruction_cache_enabled(&self) -> bool {
+        self.cache_control & 0x800 != 0
+    }
+
     pub fn read(&self, address: u32) -> u32 {
         let mut word = 0;
 
