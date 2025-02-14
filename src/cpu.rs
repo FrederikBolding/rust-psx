@@ -113,7 +113,12 @@ impl CPU {
                     panic!("ADD")
                 }
                 0b100001 => {
-                    panic!("ADDU")
+                    // ADDU
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+                    
+                    self.registers[d] = self.registers[s].wrapping_add(self.registers[t]);
                 }
                 0b100010 => {
                     panic!("SUB")
@@ -144,7 +149,14 @@ impl CPU {
                     panic!("SLT")
                 }
                 0b101011 => {
-                    panic!("SLTU")
+                    // SLTU
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = if self.registers[s] < self.registers[t] { 1 } else { 0 };
+
+                    self.registers[d] = value;
                 }
                 _ => {
                     panic!("Invalid instruction")
