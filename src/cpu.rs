@@ -1,4 +1,4 @@
-use crate::mmu::{BIOS_START, MMU};
+use crate::mmu::MMU;
 
 pub struct CPU {
     registers: [u32; 32],
@@ -10,13 +10,15 @@ pub struct CPU {
     cop0: Coprocessor,
 }
 
+const START_PC: u32 = 0xBFC00000;
+
 impl CPU {
     pub fn new(mmu: MMU) -> Self {
         Self {
             registers: [0; 32],
             current_pc: 0,
-            pc: BIOS_START,
-            next_pc: BIOS_START.wrapping_add(4),
+            pc: START_PC,
+            next_pc: START_PC.wrapping_add(4),
             mmu,
             cop0: Coprocessor::new(),
         }
@@ -181,7 +183,15 @@ impl CPU {
                 panic!("BGTZ")
             }
             0b001000 => {
-                panic!("ADDI")
+                // ADDI
+                let immediate = instruction.immediate_sign_extended() as i32;
+                let t = instruction.t() as usize;
+                let s = instruction.s() as usize;
+
+                match (self.registers[s] as i32).checked_add(immediate) {
+                    Some(value) => self.registers[t] = value as u32,
+                    None => panic!("Overflow not handled"),
+                }
             }
             0b001001 => {
                 // ADDIU
@@ -240,10 +250,16 @@ impl CPU {
                         let value = self.registers[r as usize];
 
                         match cop0_r {
+                            3 | 5 | 6 | 7 | 9 | 11 => {
+                                // No-op, ignoring breakpoints for now
+                            }
                             12 => {
                                 self.cop0.status = value;
                             }
-                            _ => panic!("Unsupported COP0 register"),
+                            13 => {
+                                self.cop0.cause = value;
+                            }
+                            _ => panic!("Unsupported COP0 register {}", cop0_r),
                         }
                     }
                     0b1000 => {
@@ -273,7 +289,16 @@ impl CPU {
                 panic!("LWL")
             }
             0b100011 => {
-                panic!("LW")
+                // LW
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+
+                // TODO: Write/read queue
+                let value = self.mmu.read(address);
+                self.registers[t] = value;
             }
             0b100100 => {
                 panic!("LBU")
