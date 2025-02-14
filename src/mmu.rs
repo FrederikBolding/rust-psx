@@ -22,9 +22,17 @@ pub const IO_START: u32 = 0x1F801000;
 pub const IO_SIZE: u32 = 4 * 1024;
 pub const IO_END: u32 = IO_START + IO_SIZE;
 
-pub const BIOS_START: u32 = 0xBFC00000;
+pub const BIOS_START: u32 = 0x1FC00000;
 pub const BIOS_SIZE: u32 = 512 * 1014;
 pub const BIOS_END: u32 = BIOS_START + BIOS_SIZE;
+
+// Since some of the memory regions are mirrors of each other, these masks let us map them to the same memory region where applicable.
+const MEMORY_REGION_MASK: [u32; 8] = [
+    0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, // KUSEG
+    0x7FFFFFFF, // KSEG0
+    0x1FFFFFFF, // KSEG1
+    0xFFFFFFFF, 0xFFFFFFFF, // KSEG2
+];
 
 pub struct MMU {
     bios: Vec<u8>,
@@ -56,10 +64,12 @@ impl MMU {
     pub fn read(&self, address: u32) -> u32 {
         let mut word = 0;
 
+        let address = address & MEMORY_REGION_MASK[(address >> 29) as usize];
+
         let offset = match address {
             RAM_START..RAM_END => address,
             BIOS_START..BIOS_END => address - BIOS_START,
-            _ => panic!("Cannot read from address"),
+            _ => panic!("Cannot read from address 0x{:2x}", address),
         } as usize;
 
         let source = match address {
@@ -77,6 +87,8 @@ impl MMU {
     }
 
     pub fn write(&mut self, address: u32, value: u32) {
+        let address = address & MEMORY_REGION_MASK[(address >> 29) as usize];
+
         for i in 0..4 {
             match address {
                 RAM_START..RAM_END => {
