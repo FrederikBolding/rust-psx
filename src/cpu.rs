@@ -61,7 +61,14 @@ impl CPU {
                     panic!("SRL")
                 }
                 0b000011 => {
-                    panic!("SRA")
+                    // SRA
+                    let shift = instruction.immediate_shift();
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = (self.registers[t] as i32) >> shift;
+
+                    self.registers[d] = value as u32;
                 }
                 0b000100 => {
                     panic!("SSLV")
@@ -77,7 +84,13 @@ impl CPU {
                     self.next_pc = self.registers[instruction.s() as usize];
                 }
                 0b001001 => {
-                    panic!("JALR")
+                    // JALR
+                    let s = instruction.s() as usize;
+                    let d = instruction.d() as usize;
+
+                    self.registers[d] = self.next_pc;
+
+                    self.next_pc = self.registers[s];
                 }
                 0b001100 => {
                     panic!("SYSCALL")
@@ -114,7 +127,7 @@ impl CPU {
                     let s = instruction.s() as usize;
                     let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
-    
+
                     match (self.registers[s] as i32).checked_add(self.registers[t] as i32) {
                         Some(value) => self.registers[d] = value as u32,
                         None => panic!("Overflow not handled"),
@@ -132,7 +145,12 @@ impl CPU {
                     panic!("SUB")
                 }
                 0b100011 => {
-                    panic!("SUBU")
+                    // SUBU
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    self.registers[d] = self.registers[s].wrapping_sub(self.registers[t]);
                 }
                 0b100100 => {
                     // AND
@@ -182,7 +200,29 @@ impl CPU {
                 }
             },
             0b000001 => {
-                panic!("BXX")
+                match instruction.d() {
+                    0b00000 => {
+                        // BLTZ
+                        let s = instruction.s() as usize;
+
+                        let value = (self.registers[s] as i32) < 0;
+
+                        if value {
+                            let immediate = instruction.immediate_sign_extended();
+                            self.next_pc = self.pc.wrapping_add(immediate << 2);
+                        }
+                    }
+                    0b00001 => {
+                        panic!("BGEZ");
+                    }
+                    0b10000 => {
+                        panic!("BLTZAL");
+                    }
+                    0b10001 => {
+                        panic!("BGEZAL");
+                    }
+                    _ => panic!("Unsupported branching instruction"),
+                }
             }
             0b000010 => {
                 // J
@@ -221,10 +261,26 @@ impl CPU {
                 }
             }
             0b000110 => {
-                panic!("BLEZ")
+                // BLEZ
+                let s = instruction.s();
+
+                let value = self.registers[s as usize] <= 0;
+
+                if value {
+                    let immediate = instruction.immediate_sign_extended();
+                    self.next_pc = self.pc.wrapping_add(immediate << 2);
+                }
             }
             0b000111 => {
-                panic!("BGTZ")
+                // BGTZ
+                let s = instruction.s();
+
+                let value = self.registers[s as usize] > 0;
+
+                if value {
+                    let immediate = instruction.immediate_sign_extended();
+                    self.next_pc = self.pc.wrapping_add(immediate << 2);
+                }
             }
             0b001000 => {
                 // ADDI
@@ -248,7 +304,18 @@ impl CPU {
                 self.registers[t] = value;
             }
             0b001010 => {
-                panic!("SLTI")
+                // SLTI
+                let immediate = instruction.immediate_sign_extended() as i32;
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let value = if (self.registers[s] as i32) < immediate {
+                    1
+                } else {
+                    0
+                };
+
+                self.registers[t] = value;
             }
             0b001011 => {
                 panic!("SLTIU")
@@ -291,7 +358,7 @@ impl CPU {
                         // MFC0
                         let r = instruction.t() as usize;
                         let cop0_r = instruction.d() as usize;
-                        
+
                         match cop0_r {
                             3 | 5 | 6 | 7 | 9 | 11 => {
                                 // No-op, ignoring breakpoints for now
@@ -384,7 +451,16 @@ impl CPU {
                 self.registers[t] = value;
             }
             0b100100 => {
-                panic!("LBU")
+                // LBU
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+
+                // TODO: Load delay?
+                let value = self.mmu.read(address, 1);
+                self.registers[t] = value;
             }
             0b100101 => {
                 panic!("LHU")

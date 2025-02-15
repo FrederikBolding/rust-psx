@@ -48,6 +48,9 @@ pub struct MMU {
     ram_size: u32,
     // Cache control (memory control 3)
     cache_control: u32,
+
+    interrupt_status: u16,
+    interrupt_mask: u16,
 }
 
 impl MMU {
@@ -58,6 +61,8 @@ impl MMU {
             memory_control: [0; 9],
             ram_size: 0,
             cache_control: 0,
+            interrupt_status: 0,
+            interrupt_mask: 0,
         }
     }
 
@@ -118,6 +123,12 @@ impl MMU {
             }
             0x1F801060 => {
                 self.ram_size = value;
+            }
+            0x1F801070 => {
+                self.interrupt_status = value as u16;
+            }
+            0x1F801074 => {
+                self.interrupt_mask = value as u16;
             }
             0x1F801D80..0x1F801DBC => {
                 // TODO: Sound Processing Unit registers
