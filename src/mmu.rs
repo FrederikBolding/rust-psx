@@ -66,9 +66,18 @@ impl MMU {
     }
 
     pub fn read(&self, address: u32, size: u32) -> u32 {
-        let mut word = 0;
-
         let address = address & MEMORY_REGION_MASK[(address >> 29) as usize];
+
+        // TODO: Simplify
+        match address {
+            EXPANSION_1_START..EXPANSION_1_END => {
+                // Emulate nothing being connected to the expansion port
+                return 1;
+            }
+            _ => {}
+        }
+
+        let mut word = 0;
 
         let offset = match address {
             RAM_START..RAM_END => address,

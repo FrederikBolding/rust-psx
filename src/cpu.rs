@@ -110,7 +110,15 @@ impl CPU {
                     panic!("DIVU")
                 }
                 0b100000 => {
-                    panic!("ADD")
+                    // ADD
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+    
+                    match (self.registers[s] as i32).checked_add(self.registers[t] as i32) {
+                        Some(value) => self.registers[d] = value as u32,
+                        None => panic!("Overflow not handled"),
+                    }
                 }
                 0b100001 => {
                     // ADDU
@@ -127,7 +135,14 @@ impl CPU {
                     panic!("SUBU")
                 }
                 0b100100 => {
-                    panic!("AND")
+                    // AND
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = self.registers[s] & self.registers[t];
+
+                    self.registers[d] = value;
                 }
                 0b100101 => {
                     // OR
@@ -273,17 +288,29 @@ impl CPU {
                 let coprocessor_opcode = instruction.coprocessor_opcode();
                 match coprocessor_opcode {
                     0b0000 => {
-                        panic!("MFC0");
+                        // MFC0
+                        let r = instruction.t() as usize;
+                        let cop0_r = instruction.d() as usize;
+                        
+                        match cop0_r {
+                            3 | 5 | 6 | 7 | 9 | 11 => {
+                                // No-op, ignoring breakpoints for now
+                            }
+                            12 => {
+                                self.registers[r] = self.cop0.status;
+                            }
+                            _ => panic!("Unsupported COP0 register {}", cop0_r),
+                        }
                     }
                     0b0010 => {
                         panic!("CFC0");
                     }
                     0b0100 => {
                         // MTC0
-                        let r = instruction.t();
-                        let cop0_r = instruction.d();
+                        let r = instruction.t() as usize;
+                        let cop0_r = instruction.d() as usize;
 
-                        let value = self.registers[r as usize];
+                        let value = self.registers[r];
 
                         match cop0_r {
                             3 | 5 | 6 | 7 | 9 | 11 => {
