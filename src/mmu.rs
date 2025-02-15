@@ -79,6 +79,8 @@ impl MMU {
                 // Emulate nothing being connected to the expansion port
                 return 1;
             }
+            0x1F801070 => return self.interrupt_status as u32,
+            0x1F801074 => return self.interrupt_mask as u32,
             _ => {}
         }
 

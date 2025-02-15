@@ -1,11 +1,13 @@
 use crate::mmu::MMU;
 
 pub struct CPU {
-    registers: [u32; 32],
+    registers: [u32; 32], // R0..R31
     // Since the CPU is pipelined, we need to keep track of multiple program counters to properly handle branches
     current_pc: u32, // The currently executing instruction
     pc: u32,         // Points to the next instruction, NOT the currently executing instruction
-    next_pc: u32,
+    next_pc: u32,    // Points to the following instruction after pc
+    hi: u32,         // Registers used for mult and div results
+    lo: u32,         // Registers used for mult and div results
     mmu: MMU,
     cop0: Coprocessor,
 }
@@ -19,6 +21,8 @@ impl CPU {
             current_pc: 0,
             pc: START_PC,
             next_pc: START_PC.wrapping_add(4),
+            hi: 0,
+            lo: 0,
             mmu,
             cop0: Coprocessor::new(),
         }
@@ -58,7 +62,14 @@ impl CPU {
                     self.registers[d] = value;
                 }
                 0b000010 => {
-                    panic!("SRL")
+                    // SRL
+                    let shift = instruction.immediate_shift();
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = self.registers[t] >> shift;
+
+                    self.registers[d] = value as u32;
                 }
                 0b000011 => {
                     // SRA
@@ -99,13 +110,19 @@ impl CPU {
                     panic!("BREAK")
                 }
                 0b010000 => {
-                    panic!("MFHI")
+                    // MFHI
+                    let d = instruction.d() as usize;
+
+                    self.registers[d] = self.hi;
                 }
                 0b010001 => {
                     panic!("MTHI")
                 }
                 0b010010 => {
-                    panic!("MFLO")
+                    // MFLO
+                    let d = instruction.d() as usize;
+
+                    self.registers[d] = self.lo;
                 }
                 0b010011 => {
                     panic!("MTLO")
@@ -117,10 +134,40 @@ impl CPU {
                     panic!("MULTU")
                 }
                 0b011010 => {
-                    panic!("DIV")
+                    // DIV
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+
+                    let numerator = self.registers[s] as i32;
+                    let denominator = self.registers[t] as i32;
+
+                    // TODO: Handle these cases
+                    if denominator == 0 {
+                        panic!("Division by zero");
+                    } else if denominator == -1 && numerator as u32 == (i32::MIN as u32) {
+                        panic!("Division by -1");
+                    }
+
+                    // Default case
+                    self.hi = (numerator % denominator) as u32;
+                    self.lo = (numerator / denominator) as u32;
                 }
                 0b011011 => {
-                    panic!("DIVU")
+                    // DIVU
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+
+                    let numerator = self.registers[s];
+                    let denominator = self.registers[t];
+
+                    // TODO: Handle this case
+                    if denominator == 0 {
+                        panic!("Division by zero");
+                    }
+
+                    // Default case
+                    self.hi = numerator % denominator;
+                    self.lo = numerator / denominator;
                 }
                 0b100000 => {
                     // ADD
@@ -179,7 +226,18 @@ impl CPU {
                     panic!("NOR")
                 }
                 0b101010 => {
-                    panic!("SLT")
+                    // SLT
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = if (self.registers[s] as i32) < (self.registers[t] as i32) {
+                        1
+                    } else {
+                        0
+                    };
+
+                    self.registers[d] = value;
                 }
                 0b101011 => {
                     // SLTU
@@ -200,7 +258,7 @@ impl CPU {
                 }
             },
             0b000001 => {
-                match instruction.d() {
+                match instruction.t() {
                     0b00000 => {
                         // BLTZ
                         let s = instruction.s() as usize;
@@ -213,7 +271,15 @@ impl CPU {
                         }
                     }
                     0b00001 => {
-                        panic!("BGEZ");
+                        // BGEZ
+                        let s = instruction.s() as usize;
+
+                        let value = (self.registers[s] as i32) >= 0;
+
+                        if value {
+                            let immediate = instruction.immediate_sign_extended();
+                            self.next_pc = self.pc.wrapping_add(immediate << 2);
+                        }
                     }
                     0b10000 => {
                         panic!("BLTZAL");
@@ -221,7 +287,7 @@ impl CPU {
                     0b10001 => {
                         panic!("BGEZAL");
                     }
-                    _ => panic!("Unsupported branching instruction"),
+                    t => panic!("Unsupported branching instruction: {}", t),
                 }
             }
             0b000010 => {
@@ -318,7 +384,14 @@ impl CPU {
                 self.registers[t] = value;
             }
             0b001011 => {
-                panic!("SLTIU")
+                // SLTIU
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let value = if self.registers[s] < immediate { 1 } else { 0 };
+
+                self.registers[t] = value;
             }
             0b001100 => {
                 // ANDI
