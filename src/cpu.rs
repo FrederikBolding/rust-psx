@@ -25,7 +25,7 @@ impl CPU {
     }
 
     fn load_instruction(&self) -> Instruction {
-        let word = self.mmu.read(self.pc);
+        let word = self.mmu.read(self.pc, 4);
 
         Instruction(word)
     }
@@ -117,7 +117,7 @@ impl CPU {
                     let s = instruction.s() as usize;
                     let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
-                    
+
                     self.registers[d] = self.registers[s].wrapping_add(self.registers[t]);
                 }
                 0b100010 => {
@@ -154,7 +154,11 @@ impl CPU {
                     let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
 
-                    let value = if self.registers[s] < self.registers[t] { 1 } else { 0 };
+                    let value = if self.registers[s] < self.registers[t] {
+                        1
+                    } else {
+                        0
+                    };
 
                     self.registers[d] = value;
                 }
@@ -171,10 +175,23 @@ impl CPU {
                 self.next_pc = (self.pc & 0xF0000000) | jump
             }
             0b000011 => {
-                panic!("JAL")
+                // JAL
+                self.registers[31] = self.next_pc;
+
+                let jump = instruction.immediate_jump();
+                self.next_pc = (self.pc & 0xF0000000) | jump
             }
             0b000100 => {
-                panic!("BEQ")
+                // BEQ
+                let s = instruction.s();
+                let t = instruction.t();
+
+                let value = self.registers[s as usize] == self.registers[t as usize];
+
+                if value {
+                    let immediate = instruction.immediate_sign_extended();
+                    self.next_pc = self.pc.wrapping_add(immediate << 2);
+                }
             }
             0b000101 => {
                 // BNE
@@ -222,7 +239,14 @@ impl CPU {
                 panic!("SLTIU")
             }
             0b001100 => {
-                panic!("ANDI")
+                // ANDI
+                let immediate = instruction.immediate();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let value = self.registers[s] & immediate;
+
+                self.registers[t] = value;
             }
             0b001101 => {
                 // ORI
@@ -292,10 +316,30 @@ impl CPU {
                 panic!("COP3")
             }
             0b100000 => {
-                panic!("LB")
+                // LB
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+
+                // TODO: Load delay?
+                // Should be sign-extended
+                let value = self.mmu.read(address, 1) as i8;
+                self.registers[t] = value as u32;
             }
             0b100001 => {
-                panic!("LH")
+                // LH
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+
+                // TODO: Load delay?
+                // Should be sign-extended
+                let value = self.mmu.read(address, 2) as i16;
+                self.registers[t] = value as u32;
             }
             0b100010 => {
                 panic!("LWL")
@@ -308,8 +352,8 @@ impl CPU {
 
                 let address = self.registers[s].wrapping_add(immediate);
 
-                // TODO: Write/read queue
-                let value = self.mmu.read(address);
+                // TODO: Load delay?
+                let value = self.mmu.read(address, 4);
                 self.registers[t] = value;
             }
             0b100100 => {
@@ -322,10 +366,38 @@ impl CPU {
                 panic!("LWR")
             }
             0b101000 => {
-                panic!("SB")
+                // SB
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+                let t = instruction.t() as usize;
+                let value = self.registers[t];
+
+                if self.cop0.is_cache_isolated() {
+                    // TODO: Handle writing to the cache
+                    return;
+                }
+
+                // TODO: Load delay?
+                self.mmu.write(address, 1, value);
             }
             0b101001 => {
-                panic!("SH")
+                // SH
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+                let t = instruction.t() as usize;
+                let value = self.registers[t];
+
+                if self.cop0.is_cache_isolated() {
+                    // TODO: Handle writing to the cache
+                    return;
+                }
+
+                // TODO: Load delay?
+                self.mmu.write(address, 2, value);
             }
             0b101010 => {
                 panic!("SWL")
@@ -344,8 +416,8 @@ impl CPU {
                     return;
                 }
 
-                // TODO: Write queue?
-                self.mmu.write(address, value);
+                // TODO: Load delay?
+                self.mmu.write(address, 4, value);
             }
             0b101110 => {
                 panic!("SWR")
