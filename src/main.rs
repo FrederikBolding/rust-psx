@@ -5,6 +5,7 @@ use mmu::MMU;
 
 mod cpu;
 mod mmu;
+mod timers;
 
 const BIOS_PATH: &str = "./static/bios/PSXBIOS.bin";
 

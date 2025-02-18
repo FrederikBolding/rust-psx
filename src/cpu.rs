@@ -42,6 +42,9 @@ impl CPU {
         self.next_pc = self.next_pc.wrapping_add(4);
 
         self.execute(instruction);
+
+        // Each instruction takes one cycle
+        self.mmu.step(1);
     }
 
     fn execute(&mut self, instruction: Instruction) {
@@ -328,9 +331,9 @@ impl CPU {
             }
             0b000110 => {
                 // BLEZ
-                let s = instruction.s();
+                let s = instruction.s() as usize;
 
-                let value = self.registers[s as usize] <= 0;
+                let value = (self.registers[s] as i32) <= 0;
 
                 if value {
                     let immediate = instruction.immediate_sign_extended();
@@ -339,9 +342,9 @@ impl CPU {
             }
             0b000111 => {
                 // BGTZ
-                let s = instruction.s();
+                let s = instruction.s() as usize;
 
-                let value = self.registers[s as usize] > 0;
+                let value = (self.registers[s]) as i32 > 0;
 
                 if value {
                     let immediate = instruction.immediate_sign_extended();

@@ -1,3 +1,5 @@
+use crate::timers::Timers;
+
 /**
 *   KUSEG     KSEG0     KSEG1
  00000000h 80000000h A0000000h  2048K  Main RAM (first 64K reserved for BIOS)
@@ -51,6 +53,8 @@ pub struct MMU {
 
     interrupt_status: u16,
     interrupt_mask: u16,
+
+    timers: Timers,
 }
 
 impl MMU {
@@ -63,7 +67,12 @@ impl MMU {
             cache_control: 0,
             interrupt_status: 0,
             interrupt_mask: 0,
+            timers: Timers::new(),
         }
+    }
+
+    pub fn step(&mut self, cycles: u32) {
+        self.timers.step(cycles);
     }
 
     pub fn is_instruction_cache_enabled(&self) -> bool {
@@ -81,6 +90,8 @@ impl MMU {
             }
             0x1F801070 => return self.interrupt_status as u32,
             0x1F801074 => return self.interrupt_mask as u32,
+            // Timers
+            0x1F801100..0x1F80110F => return self.timers.read(address - 0x1F801100),
             _ => {}
         }
 
@@ -131,6 +142,10 @@ impl MMU {
             }
             0x1F801074 => {
                 self.interrupt_mask = value as u16;
+            }
+            // Timers
+            0x1F801100..0x1F80112F => {
+                self.timers.write(address - 0x1F801100, value);
             }
             0x1F801D80..0x1F801DBC => {
                 // TODO: Sound Processing Unit registers
