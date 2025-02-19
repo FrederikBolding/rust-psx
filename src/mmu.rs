@@ -82,17 +82,15 @@ impl MMU {
     pub fn read(&self, address: u32, size: u32) -> u32 {
         let address = address & MEMORY_REGION_MASK[(address >> 29) as usize];
 
-        // TODO: Simplify
-        match address {
-            EXPANSION_1_START..EXPANSION_1_END => {
-                // Emulate nothing being connected to the expansion port
-                return 1;
+        if size == 4 {
+            // TODO: Simplify
+            match address {
+                0x1F801070 => return self.interrupt_status as u32,
+                0x1F801074 => return self.interrupt_mask as u32,
+                // Timers
+                0x1F801100..0x1F80112F => return self.timers.read(address - 0x1F801100),
+                _ => {}
             }
-            0x1F801070 => return self.interrupt_status as u32,
-            0x1F801074 => return self.interrupt_mask as u32,
-            // Timers
-            0x1F801100..0x1F80110F => return self.timers.read(address - 0x1F801100),
-            _ => {}
         }
 
         let mut word = 0;
@@ -100,12 +98,17 @@ impl MMU {
         let offset = match address {
             RAM_START..RAM_END => address,
             BIOS_START..BIOS_END => address - BIOS_START,
+            EXPANSION_1_START..EXPANSION_1_END => 0,
             _ => panic!("Cannot read from address 0x{:2x}", address),
         } as usize;
 
         let source = match address {
             RAM_START..RAM_END => &self.ram[offset..offset + 4],
             BIOS_START..BIOS_END => &self.bios[offset..offset + 4],
+            EXPANSION_1_START..EXPANSION_1_END => {
+                // Emulate nothing being connected to the expansion port
+                return !0;
+            }
             _ => panic!("Cannot read from address"),
         };
 
