@@ -10,6 +10,7 @@ pub struct CPU {
     lo: u32,         // Registers used for mult and div results
     mmu: MMU,
     cop0: Coprocessor,
+    next_load: (u32, u32), // Temporarily store loaded values between instruction execution
 }
 
 const START_PC: u32 = 0xBFC00000;
@@ -25,10 +26,12 @@ impl CPU {
             lo: 0,
             mmu,
             cop0: Coprocessor::new(),
+            next_load: (0,0),
         }
     }
 
     fn load_instruction(&self) -> Instruction {
+        //println!("{} regs={:?}", self.pc, self.registers);
         let word = self.mmu.read(self.pc, 4);
 
         Instruction(word)
@@ -62,6 +65,8 @@ impl CPU {
 
                     let value = self.registers[t] << shift;
 
+                    self.finish_load();
+
                     self.registers[d] = value;
                 }
                 0b000010 => {
@@ -72,6 +77,8 @@ impl CPU {
 
                     let value = self.registers[t] >> shift;
 
+                    self.finish_load();
+
                     self.registers[d] = value as u32;
                 }
                 0b000011 => {
@@ -81,6 +88,8 @@ impl CPU {
                     let d = instruction.d() as usize;
 
                     let value = (self.registers[t] as i32) >> shift;
+
+                    self.finish_load();
 
                     self.registers[d] = value as u32;
                 }
@@ -95,16 +104,24 @@ impl CPU {
                 }
                 0b001000 => {
                     // JR
-                    self.next_pc = self.registers[instruction.s() as usize];
+                    let next = self.registers[instruction.s() as usize];
+
+                    self.finish_load();
+
+                    self.next_pc = next;
                 }
                 0b001001 => {
                     // JALR
                     let s = instruction.s() as usize;
                     let d = instruction.d() as usize;
 
-                    self.registers[d] = self.next_pc;
+                    let return_address = self.next_pc;
 
                     self.next_pc = self.registers[s];
+
+                    self.finish_load();
+
+                    self.registers[d] = return_address;
                 }
                 0b001100 => {
                     panic!("SYSCALL")
@@ -116,6 +133,8 @@ impl CPU {
                     // MFHI
                     let d = instruction.d() as usize;
 
+                    self.finish_load();
+
                     self.registers[d] = self.hi;
                 }
                 0b010001 => {
@@ -124,6 +143,8 @@ impl CPU {
                 0b010010 => {
                     // MFLO
                     let d = instruction.d() as usize;
+
+                    self.finish_load();
 
                     self.registers[d] = self.lo;
                 }
@@ -144,6 +165,8 @@ impl CPU {
                     let numerator = self.registers[s] as i32;
                     let denominator = self.registers[t] as i32;
 
+                    self.finish_load();
+
                     // TODO: Handle these cases
                     if denominator == 0 {
                         panic!("Division by zero");
@@ -163,6 +186,8 @@ impl CPU {
                     let numerator = self.registers[s];
                     let denominator = self.registers[t];
 
+                    self.finish_load();
+
                     // TODO: Handle this case
                     if denominator == 0 {
                         panic!("Division by zero");
@@ -178,7 +203,12 @@ impl CPU {
                     let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
 
-                    match (self.registers[s] as i32).checked_add(self.registers[t] as i32) {
+                    let a = self.registers[s] as i32;
+                    let b = self.registers[t] as i32;
+
+                    self.finish_load();
+
+                    match a.checked_add(b) {
                         Some(value) => self.registers[d] = value as u32,
                         None => panic!("Overflow not handled"),
                     }
@@ -189,7 +219,14 @@ impl CPU {
                     let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
 
-                    self.registers[d] = self.registers[s].wrapping_add(self.registers[t]);
+                    let a = self.registers[s];
+                    let b = self.registers[t];
+
+                    let value = a.wrapping_add(b);
+
+                    self.finish_load();
+
+                    self.registers[d] = value;
                 }
                 0b100010 => {
                     panic!("SUB")
@@ -200,7 +237,12 @@ impl CPU {
                     let t = instruction.t() as usize;
                     let d = instruction.d() as usize;
 
-                    self.registers[d] = self.registers[s].wrapping_sub(self.registers[t]);
+                    let a = self.registers[s];
+                    let b = self.registers[t];
+
+                    self.finish_load();
+
+                    self.registers[d] = a.wrapping_sub(b);
                 }
                 0b100100 => {
                     // AND
@@ -209,6 +251,8 @@ impl CPU {
                     let d = instruction.d() as usize;
 
                     let value = self.registers[s] & self.registers[t];
+
+                    self.finish_load();
 
                     self.registers[d] = value;
                 }
@@ -219,6 +263,8 @@ impl CPU {
                     let d = instruction.d() as usize;
 
                     let value = self.registers[s] | self.registers[t];
+
+                    self.finish_load();
 
                     self.registers[d] = value;
                 }
@@ -240,6 +286,8 @@ impl CPU {
                         0
                     };
 
+                    self.finish_load();
+
                     self.registers[d] = value;
                 }
                 0b101011 => {
@@ -253,6 +301,8 @@ impl CPU {
                     } else {
                         0
                     };
+
+                    self.finish_load();
 
                     self.registers[d] = value;
                 }
@@ -272,6 +322,8 @@ impl CPU {
                             let immediate = instruction.immediate_sign_extended();
                             self.next_pc = self.pc.wrapping_add(immediate << 2);
                         }
+
+                        self.finish_load();
                     }
                     0b00001 => {
                         // BGEZ
@@ -283,6 +335,8 @@ impl CPU {
                             let immediate = instruction.immediate_sign_extended();
                             self.next_pc = self.pc.wrapping_add(immediate << 2);
                         }
+
+                        self.finish_load();
                     }
                     0b10000 => {
                         panic!("BLTZAL");
@@ -296,14 +350,20 @@ impl CPU {
             0b000010 => {
                 // J
                 let jump = instruction.immediate_jump();
-                self.next_pc = (self.pc & 0xF0000000) | jump
+                self.next_pc = (self.pc & 0xF0000000) | jump;
+
+                self.finish_load();
             }
             0b000011 => {
                 // JAL
-                self.registers[31] = self.next_pc;
+                let return_address = self.next_pc;
 
                 let jump = instruction.immediate_jump();
-                self.next_pc = (self.pc & 0xF0000000) | jump
+                self.next_pc = (self.pc & 0xF0000000) | jump;
+
+                self.finish_load();
+
+                self.registers[31] = return_address;
             }
             0b000100 => {
                 // BEQ
@@ -316,6 +376,8 @@ impl CPU {
                     let immediate = instruction.immediate_sign_extended();
                     self.next_pc = self.pc.wrapping_add(immediate << 2);
                 }
+
+                self.finish_load();
             }
             0b000101 => {
                 // BNE
@@ -328,6 +390,8 @@ impl CPU {
                     let immediate = instruction.immediate_sign_extended();
                     self.next_pc = self.pc.wrapping_add(immediate << 2);
                 }
+
+                self.finish_load();
             }
             0b000110 => {
                 // BLEZ
@@ -339,6 +403,8 @@ impl CPU {
                     let immediate = instruction.immediate_sign_extended();
                     self.next_pc = self.pc.wrapping_add(immediate << 2);
                 }
+
+                self.finish_load();
             }
             0b000111 => {
                 // BGTZ
@@ -350,6 +416,8 @@ impl CPU {
                     let immediate = instruction.immediate_sign_extended();
                     self.next_pc = self.pc.wrapping_add(immediate << 2);
                 }
+
+                self.finish_load();
             }
             0b001000 => {
                 // ADDI
@@ -357,7 +425,11 @@ impl CPU {
                 let t = instruction.t() as usize;
                 let s = instruction.s() as usize;
 
-                match (self.registers[s] as i32).checked_add(immediate) {
+                let a = self.registers[s] as i32;
+
+                self.finish_load();
+
+                match a.checked_add(immediate) {
                     Some(value) => self.registers[t] = value as u32,
                     None => panic!("Overflow not handled"),
                 }
@@ -369,6 +441,8 @@ impl CPU {
                 let t = instruction.t() as usize;
 
                 let value = self.registers[s].wrapping_add(immediate);
+
+                self.finish_load();
 
                 self.registers[t] = value;
             }
@@ -384,6 +458,8 @@ impl CPU {
                     0
                 };
 
+                self.finish_load();
+
                 self.registers[t] = value;
             }
             0b001011 => {
@@ -393,6 +469,8 @@ impl CPU {
                 let t = instruction.t() as usize;
 
                 let value = if self.registers[s] < immediate { 1 } else { 0 };
+
+                self.finish_load();
 
                 self.registers[t] = value;
             }
@@ -404,6 +482,8 @@ impl CPU {
 
                 let value = self.registers[s] & immediate;
 
+                self.finish_load();
+
                 self.registers[t] = value;
             }
             0b001101 => {
@@ -414,6 +494,8 @@ impl CPU {
 
                 let value = self.registers[s] | immediate;
 
+                self.finish_load();
+
                 self.registers[t] = value;
             }
             0b001110 => {
@@ -421,10 +503,14 @@ impl CPU {
             }
             0b001111 => {
                 // LUI
-                let value = instruction.immediate();
+                let immediate = instruction.immediate();
                 let t = instruction.t() as usize;
 
-                self.registers[t] = value << 16;
+                let value = immediate << 16;
+
+                self.finish_load();
+
+                self.registers[t] = value;
             }
             0b010000 => {
                 // COP0
@@ -440,7 +526,7 @@ impl CPU {
                                 // No-op, ignoring breakpoints for now
                             }
                             12 => {
-                                self.registers[r] = self.cop0.status;
+                                self.setup_load(r as u32, self.cop0.status);
                             }
                             _ => panic!("Unsupported COP0 register {}", cop0_r),
                         }
@@ -455,6 +541,8 @@ impl CPU {
 
                         let value = self.registers[r];
 
+                        self.finish_load();
+
                         match cop0_r {
                             3 | 5 | 6 | 7 | 9 | 11 => {
                                 // No-op, ignoring breakpoints for now
@@ -463,7 +551,7 @@ impl CPU {
                                 self.cop0.status = value;
                             }
                             13 => {
-                                self.cop0.cause = value;
+                                self.cop0.cause = (self.cop0.cause & !0x300) | (value & 0x300);
                             }
                             _ => panic!("Unsupported COP0 register {}", cop0_r),
                         }
@@ -496,7 +584,8 @@ impl CPU {
                 // TODO: Load delay?
                 // Should be sign-extended
                 let value = self.mmu.read(address, 1) as i8;
-                self.registers[t] = value as u32;
+                self.setup_load(t as u32, value as u32);
+                // self.registers[t] = value as u32;
             }
             0b100001 => {
                 // LH
@@ -509,7 +598,8 @@ impl CPU {
                 // TODO: Load delay?
                 // Should be sign-extended
                 let value = self.mmu.read(address, 2) as i16;
-                self.registers[t] = value as u32;
+                self.setup_load(t as u32, value as u32);
+                // self.registers[t] = value as u32;
             }
             0b100010 => {
                 panic!("LWL")
@@ -524,7 +614,8 @@ impl CPU {
 
                 // TODO: Load delay?
                 let value = self.mmu.read(address, 4);
-                self.registers[t] = value;
+                self.setup_load(t as u32, value as u32);
+                // self.registers[t] = value;
             }
             0b100100 => {
                 // LBU
@@ -536,7 +627,8 @@ impl CPU {
 
                 // TODO: Load delay?
                 let value = self.mmu.read(address, 1);
-                self.registers[t] = value;
+                self.setup_load(t as u32, value as u32);
+                //self.registers[t] = value;
             }
             0b100101 => {
                 panic!("LHU")
@@ -552,6 +644,8 @@ impl CPU {
                 let address = self.registers[s].wrapping_add(immediate);
                 let t = instruction.t() as usize;
                 let value = self.registers[t];
+
+                self.finish_load();
 
                 if self.cop0.is_cache_isolated() {
                     // TODO: Handle writing to the cache
@@ -569,6 +663,8 @@ impl CPU {
                 let address = self.registers[s].wrapping_add(immediate);
                 let t = instruction.t() as usize;
                 let value = self.registers[t];
+
+                self.finish_load();
 
                 if self.cop0.is_cache_isolated() {
                     // TODO: Handle writing to the cache
@@ -589,6 +685,8 @@ impl CPU {
                 let address = self.registers[s as usize].wrapping_add(immediate);
                 let t = instruction.t();
                 let value = self.registers[t as usize];
+
+                self.finish_load();
 
                 if self.cop0.is_cache_isolated() {
                     // TODO: Handle writing to the cache
@@ -629,6 +727,20 @@ impl CPU {
                 panic!("Invalid instruction")
             }
         }
+    }
+
+    fn setup_load(&mut self, register: u32, value: u32) {
+        if self.next_load.0 != register {
+            self.registers[self.next_load.0 as usize] = self.next_load.1;
+        }
+
+        self.next_load = (register, value);
+    }
+
+    fn finish_load(&mut self) {
+        self.registers[self.next_load.0 as usize] = self.next_load.1;
+
+        self.next_load = (0, 0);
     }
 }
 
