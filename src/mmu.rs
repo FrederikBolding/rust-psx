@@ -79,6 +79,10 @@ impl MMU {
         self.cache_control & 0x800 != 0
     }
 
+    pub fn is_instruction_cache_tag_test_mode(&self) -> bool {
+        (self.cache_control & 4) != 0
+    }
+
     pub fn read(&self, address: u32, size: u32) -> u32 {
         let address = address & MEMORY_REGION_MASK[(address >> 29) as usize];
 

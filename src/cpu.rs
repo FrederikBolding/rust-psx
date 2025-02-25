@@ -1,5 +1,22 @@
 use crate::mmu::MMU;
 
+#[derive(Clone, Copy)]
+struct InstructionCacheLine {
+    valid: usize, // The index of the first valid word
+    tag: u32,
+    data: [u32; 4], // Four words each cache line
+}
+
+impl InstructionCacheLine {
+    pub fn new() -> Self {
+        Self {
+            valid: 0xFFFF,
+            tag: 0,
+            data: [0; 4],
+        }
+    }
+}
+
 pub struct CPU {
     registers: [u32; 32], // R0..R31
     // Since the CPU is pipelined, we need to keep track of multiple program counters to properly handle branches
@@ -11,6 +28,7 @@ pub struct CPU {
     mmu: MMU,
     cop0: Coprocessor,
     next_load: (u32, u32), // Temporarily store loaded values between instruction execution
+    instruction_cache: [InstructionCacheLine; 256],
 }
 
 const START_PC: u32 = 0xBFC00000;
@@ -26,12 +44,42 @@ impl CPU {
             lo: 0,
             mmu,
             cop0: Coprocessor::new(),
-            next_load: (0,0),
+            next_load: (0, 0),
+            instruction_cache: [InstructionCacheLine::new(); 256],
         }
     }
 
     fn load_instruction(&self) -> Instruction {
-        //println!("{} regs={:?}", self.pc, self.registers);
+        // TODO: If the instruction cache is used one step != one cycle
+        if self.mmu.is_instruction_cache_enabled() && self.pc < 0xa0000000 {
+            // Cache tag is bit 12..30
+            let tag = self.pc & 0x7FFFF000;
+
+            // Line is bit 4..11
+            let line = ((self.pc >> 4) & 0xFF) as usize;
+
+            // Line is bit 2..3
+            let index = ((self.pc >> 2) & 3) as usize;
+
+            let mut line = self.instruction_cache[line];
+
+            // Refetch instruction if cache is invalid
+            if (tag != line.tag) || (line.valid > index) || (line.valid > 4) {
+                let mut address = self.pc;
+                for i in index..4 {
+                    let instruction = self.mmu.read(address, 4);
+                    line.data[i] = instruction;
+
+                    address += 4;
+                }
+
+                line.tag = tag;
+                line.valid = index;
+            }
+
+            return Instruction(line.data[index]);
+        }
+
         let word = self.mmu.read(self.pc, 4);
 
         Instruction(word)
@@ -516,7 +564,7 @@ impl CPU {
                 // COP0
                 let coprocessor_opcode = instruction.coprocessor_opcode();
                 match coprocessor_opcode {
-                    0b0000 => {
+                    0b00000 => {
                         // MFC0
                         let r = instruction.t() as usize;
                         let cop0_r = instruction.d() as usize;
@@ -531,10 +579,7 @@ impl CPU {
                             _ => panic!("Unsupported COP0 register {}", cop0_r),
                         }
                     }
-                    0b0010 => {
-                        panic!("CFC0");
-                    }
-                    0b0100 => {
+                    0b00100 => {
                         // MTC0
                         let r = instruction.t() as usize;
                         let cop0_r = instruction.d() as usize;
@@ -556,11 +601,14 @@ impl CPU {
                             _ => panic!("Unsupported COP0 register {}", cop0_r),
                         }
                     }
-                    0b1000 => {
-                        panic!("CTC0");
+                    0b10000 => {
+                        // RFE
+                        self.finish_load();
+                        let mode = self.cop0.status & 0x3F;
+                        self.cop0.status = (self.cop0.status & !0xF) | (mode >> 2);
                     }
-                    _ => {
-                        panic!("Unhandled coprocessor opcode")
+                    o => {
+                        panic!("Unhandled coprocessor opcode {}", o);
                     }
                 }
             }
@@ -581,11 +629,9 @@ impl CPU {
 
                 let address = self.registers[s].wrapping_add(immediate);
 
-                // TODO: Load delay?
                 // Should be sign-extended
                 let value = self.mmu.read(address, 1) as i8;
                 self.setup_load(t as u32, value as u32);
-                // self.registers[t] = value as u32;
             }
             0b100001 => {
                 // LH
@@ -595,11 +641,9 @@ impl CPU {
 
                 let address = self.registers[s].wrapping_add(immediate);
 
-                // TODO: Load delay?
                 // Should be sign-extended
                 let value = self.mmu.read(address, 2) as i16;
                 self.setup_load(t as u32, value as u32);
-                // self.registers[t] = value as u32;
             }
             0b100010 => {
                 panic!("LWL")
@@ -612,10 +656,8 @@ impl CPU {
 
                 let address = self.registers[s].wrapping_add(immediate);
 
-                // TODO: Load delay?
                 let value = self.mmu.read(address, 4);
                 self.setup_load(t as u32, value as u32);
-                // self.registers[t] = value;
             }
             0b100100 => {
                 // LBU
@@ -625,10 +667,8 @@ impl CPU {
 
                 let address = self.registers[s].wrapping_add(immediate);
 
-                // TODO: Load delay?
                 let value = self.mmu.read(address, 1);
                 self.setup_load(t as u32, value as u32);
-                //self.registers[t] = value;
             }
             0b100101 => {
                 panic!("LHU")
@@ -648,11 +688,10 @@ impl CPU {
                 self.finish_load();
 
                 if self.cop0.is_cache_isolated() {
-                    // TODO: Handle writing to the cache
+                    self.store_instruction_cache(address, value);
                     return;
                 }
 
-                // TODO: Load delay?
                 self.mmu.write(address, 1, value);
             }
             0b101001 => {
@@ -667,11 +706,10 @@ impl CPU {
                 self.finish_load();
 
                 if self.cop0.is_cache_isolated() {
-                    // TODO: Handle writing to the cache
+                    self.store_instruction_cache(address, value);
                     return;
                 }
 
-                // TODO: Load delay?
                 self.mmu.write(address, 2, value);
             }
             0b101010 => {
@@ -689,11 +727,10 @@ impl CPU {
                 self.finish_load();
 
                 if self.cop0.is_cache_isolated() {
-                    // TODO: Handle writing to the cache
+                    self.store_instruction_cache(address, value);
                     return;
                 }
 
-                // TODO: Load delay?
                 self.mmu.write(address, 4, value);
             }
             0b101110 => {
@@ -742,6 +779,21 @@ impl CPU {
 
         self.next_load = (0, 0);
     }
+
+    fn store_instruction_cache(&mut self, address: u32, value: u32) {
+        let line = ((address >> 4) & 0xFF) as usize;
+        let index = ((address >> 2) & 3) as usize;
+
+        let mut cache_line = self.instruction_cache[line];
+
+        if self.mmu.is_instruction_cache_tag_test_mode() {
+            cache_line.tag = value;
+        } else {
+            cache_line.data[index] = value;
+        }
+
+        cache_line.valid = 4;
+    }
 }
 
 struct Instruction(u32);
@@ -759,7 +811,7 @@ impl Instruction {
 
     // Coprocessor opcode bit 21..25
     pub fn coprocessor_opcode(&self) -> u32 {
-        (self.0 >> 21) & 0x1F
+        self.s()
     }
 
     // Immediate values are first 16 bits
