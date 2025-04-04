@@ -91,9 +91,8 @@ impl MMU {
             match address {
                 0x1F801070 => return self.interrupt_status as u32,
                 0x1F801074 => return self.interrupt_mask as u32,
-                0x1F801080..0x1F801100 => {
-                    panic!("DMA not implemented");
-                }
+                0x1F801080..0x1F801100 => return 0, // TODO: DMA
+                0x1F801C00..0x1F801E80 => return 0, // TODO: SPU
                 // Timers
                 0x1F801100..0x1F80112F => return self.timers.read(address - 0x1F801100),
                 _ => {}
@@ -160,7 +159,7 @@ impl MMU {
             0x1F801100..0x1F80112F => {
                 self.timers.write(address - 0x1F801100, value);
             }
-            0x1F801D80..0x1F801DBC => {
+            0x1F801C00..0x1F801E80 => {
                 // TODO: Sound Processing Unit registers
             }
             EXPANSION_2_START..EXPANSION_2_END => {

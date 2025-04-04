@@ -166,7 +166,16 @@ impl CPU {
                     self.registers[d] = value;
                 }
                 0b000111 => {
-                    panic!("SRAV")
+                    // SRAV
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = (self.registers[t] as i32) >> (self.registers[s] & 0x1F);
+
+                    self.finish_load();
+
+                    self.registers[d] = value as u32;
                 }
                 0b001000 => {
                     // JR
@@ -364,7 +373,16 @@ impl CPU {
                     panic!("XOR")
                 }
                 0b100111 => {
-                    panic!("NOR")
+                    // NOR
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = !(self.registers[s] | self.registers[t]);
+
+                    self.finish_load();
+
+                    self.registers[d] = value;
                 }
                 0b101010 => {
                     // SLT
