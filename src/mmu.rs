@@ -86,11 +86,14 @@ impl MMU {
     pub fn read(&self, address: u32, size: u32) -> u32 {
         let address = address & MEMORY_REGION_MASK[(address >> 29) as usize];
 
-        if size == 4 {
+        if size > 1 {
             // TODO: Simplify
             match address {
                 0x1F801070 => return self.interrupt_status as u32,
                 0x1F801074 => return self.interrupt_mask as u32,
+                0x1F801080..0x1F801100 => {
+                    panic!("DMA not implemented");
+                }
                 // Timers
                 0x1F801100..0x1F80112F => return self.timers.read(address - 0x1F801100),
                 _ => {}
@@ -149,6 +152,9 @@ impl MMU {
             }
             0x1F801074 => {
                 self.interrupt_mask = value as u16;
+            }
+            0x1F801080..0x1F801100 => {
+                println!("Ignoring DMA write");
             }
             // Timers
             0x1F801100..0x1F80112F => {

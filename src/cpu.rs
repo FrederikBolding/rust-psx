@@ -142,7 +142,16 @@ impl CPU {
                     self.registers[d] = value as u32;
                 }
                 0b000100 => {
-                    panic!("SSLV")
+                    // SLLV
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = self.registers[t] << (self.registers[s] & 0x1F);
+
+                    self.finish_load();
+
+                    self.registers[d] = value;
                 }
                 0b000110 => {
                     // SRLV
@@ -181,7 +190,10 @@ impl CPU {
                     self.registers[d] = return_address;
                 }
                 0b001100 => {
-                    panic!("SYSCALL")
+                    // SYSCALL
+                    self.finish_load();
+
+                    self.trigger_exception(Exception::SysCall);
                 }
                 0b001101 => {
                     panic!("BREAK")
@@ -195,7 +207,12 @@ impl CPU {
                     self.registers[d] = self.hi;
                 }
                 0b010001 => {
-                    panic!("MTHI")
+                    // MTHI
+                    let s = instruction.s() as usize;
+
+                    self.hi = self.registers[s];
+
+                    self.finish_load();
                 }
                 0b010010 => {
                     // MFLO
@@ -206,7 +223,12 @@ impl CPU {
                     self.registers[d] = self.lo;
                 }
                 0b010011 => {
-                    panic!("MTLO")
+                    // MTLO
+                    let s = instruction.s() as usize;
+
+                    self.lo = self.registers[s];
+
+                    self.finish_load();
                 }
                 0b011000 => {
                     panic!("MULT")
@@ -267,7 +289,7 @@ impl CPU {
 
                     match a.checked_add(b) {
                         Some(value) => self.registers[d] = value as u32,
-                        None => panic!("Overflow not handled"),
+                        None => self.trigger_exception(Exception::Overflow),
                     }
                 }
                 0b100001 => {
@@ -298,7 +320,7 @@ impl CPU {
 
                     match a.checked_sub(b) {
                         Some(value) => self.registers[d] = value as u32,
-                        None => panic!("Underflow not handled"),
+                        None => self.trigger_exception(Exception::Overflow),
                     }
                 }
                 0b100011 => {
@@ -501,7 +523,7 @@ impl CPU {
 
                 match a.checked_add(immediate) {
                     Some(value) => self.registers[t] = value as u32,
-                    None => panic!("Overflow not handled"),
+                    None => self.trigger_exception(Exception::Overflow),
                 }
             }
             0b001001 => {
@@ -597,6 +619,12 @@ impl CPU {
                             }
                             12 => {
                                 self.setup_load(r as u32, self.cop0.status);
+                            }
+                            13 => {
+                                self.setup_load(r as u32, self.cop0.cause);
+                            }
+                            14 => {
+                                self.setup_load(r as u32, self.cop0.epc);
                             }
                             _ => panic!("Unsupported COP0 register {}", cop0_r),
                         }
@@ -796,6 +824,11 @@ impl CPU {
         }
     }
 
+    fn trigger_exception(&mut self, exception: Exception) {
+        self.pc = self.cop0.trigger_exception(self.current_pc, exception);
+        self.next_pc = self.pc.wrapping_add(4);
+    }
+
     fn setup_load(&mut self, register: u32, value: u32) {
         if self.next_load.0 != register {
             self.registers[self.next_load.0 as usize] = self.next_load.1;
@@ -883,7 +916,7 @@ impl Instruction {
 struct Coprocessor {
     status: u32, // System status register
     cause: u32,  // Describes the most recently recognized exception
-    epc: u32,    // Retrun address from trap
+    epc: u32,    // Return address from trap
 }
 
 impl Coprocessor {
@@ -898,4 +931,36 @@ impl Coprocessor {
     pub fn is_cache_isolated(&self) -> bool {
         self.status & 0x10000 != 0
     }
+
+    pub fn trigger_exception(&mut self, pc: u32, exception: Exception) -> u32 {
+        let mode = self.status & 0x3F;
+        self.status = self.status & !0x3F;
+        self.status = self.status | (mode << 2) & 0x3F;
+
+        self.cause = self.cause & !0x7C;
+
+        // TODO: Deal with delay slots which changes these values
+        self.epc = pc;
+        self.cause = self.cause & !(1 << 31);
+        self.cause = self.cause | (exception as u32) << 2;
+
+        let is_bev = self.status & 0x00400000;
+
+        if is_bev != 0 {
+            0xBFC00180
+        } else {
+            0x80000080
+        }
+    }
+}
+
+enum Exception {
+    Interrupt = 0x0,
+    LoadAddressError = 0x4,
+    StoreAddressError = 0x5,
+    SysCall = 0x8,
+    Break = 0x9,
+    IllegalInstruction = 0xa,
+    CoprocessorError = 0xb,
+    Overflow = 0xc,
 }
