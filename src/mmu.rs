@@ -29,7 +29,7 @@ pub const EXPANSION_2_SIZE: u32 = 66;
 pub const EXPANSION_2_END: u32 = EXPANSION_2_START + EXPANSION_2_SIZE;
 
 pub const BIOS_START: u32 = 0x1FC00000;
-pub const BIOS_SIZE: u32 = 512 * 1014;
+pub const BIOS_SIZE: u32 = 512 * 1024;
 pub const BIOS_END: u32 = BIOS_START + BIOS_SIZE;
 
 // Since some of the memory regions are mirrors of each other, these masks let us map them to the same memory region where applicable.
