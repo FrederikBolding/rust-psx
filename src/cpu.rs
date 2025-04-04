@@ -145,7 +145,16 @@ impl CPU {
                     panic!("SSLV")
                 }
                 0b000110 => {
-                    panic!("SRLV")
+                    // SRLV
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let value = self.registers[t] >> (self.registers[s] & 0x1F);
+
+                    self.finish_load();
+
+                    self.registers[d] = value;
                 }
                 0b000111 => {
                     panic!("SRAV")
@@ -277,7 +286,20 @@ impl CPU {
                     self.registers[d] = value;
                 }
                 0b100010 => {
-                    panic!("SUB")
+                    // SUB
+                    let s = instruction.s() as usize;
+                    let t = instruction.t() as usize;
+                    let d = instruction.d() as usize;
+
+                    let a = self.registers[s] as i32;
+                    let b = self.registers[t] as i32;
+
+                    self.finish_load();
+
+                    match a.checked_sub(b) {
+                        Some(value) => self.registers[d] = value as u32,
+                        None => panic!("Underflow not handled"),
+                    }
                 }
                 0b100011 => {
                     // SUBU
@@ -671,7 +693,15 @@ impl CPU {
                 self.setup_load(t as u32, value as u32);
             }
             0b100101 => {
-                panic!("LHU")
+                // LHU
+                let immediate = instruction.immediate_sign_extended();
+                let s = instruction.s() as usize;
+                let t = instruction.t() as usize;
+
+                let address = self.registers[s].wrapping_add(immediate);
+
+                let value = self.mmu.read(address, 2);
+                self.setup_load(t as u32, value as u32);
             }
             0b100110 => {
                 panic!("LWR")
